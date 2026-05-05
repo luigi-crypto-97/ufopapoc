@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TERMINALE TRADATE // PANICO MAINFRAME</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <!-- Font estremi: Monospace per i terminali, Syncopate per i titoli -->
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Syncopate:wght@400;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'term-bg': '#020202',
+                        'term-neon': '#ff3300',
+                        'term-cyan': '#00ffcc',
+                        'term-dark': '#0a0a0a',
+                        'term-grid': '#111111',
+                        'term-alert': '#ff003c'
+                    },
+                    fontFamily: {
+                        'mono': ['Share Tech Mono', 'monospace'],
+                        'display': ['Syncopate', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* --- CORE TERMINAL AESTHETICS --- */
+        body {
+            background-color: theme('colors.term-bg');
+            color: theme('colors.term-neon');
+            font-family: 'Share Tech Mono', monospace;
+            overflow-x: hidden;
+            cursor: crosshair;
+        }
+
+        /* Matrix Canvas Background */
+        #matrix-canvas {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            z-index: -2; opacity: 0.15; pointer-events: none;
+        }
+
+        /* Scanlines & CRT Flicker */
+        .crt-overlay {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            background-size: 100% 2px, 3px 100%;
+            pointer-events: none; z-index: 9998;
+            animation: flicker 0.12s infinite;
+        }
+        @keyframes flicker { 0% { opacity: 0.95; } 50% { opacity: 0.85; } 100% { opacity: 0.95; } }
+
+        /* Radar Grid Background */
+        .radar-bg {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background-image: 
+                radial-gradient(circle at center, transparent 10%, theme('colors.term-bg') 100%),
+                linear-gradient(rgba(0, 255, 204, 0.05) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 255, 204, 0.05) 1px, transparent 1px);
+            background-size: 100% 100%, 60px 60px, 60px 60px;
+            z-index: -1; animation: grid-move 20s linear infinite;
+        }
+        @keyframes grid-move { 0% { background-position: 0 0, 0 0, 0 0; } 100% { background-position: 0 0, 60px 60px, 60px 60px; } }
+
+        /* --- INTERACTIVE PRELOADER (1.5 BAR VALVE) --- */
+        #terminal-boot {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: theme('colors.term-bg'); z-index: 99999;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            transition: opacity 0.5s;
+        }
+        .valve-container {
+            width: 320px; text-align: center; border: 2px solid theme('colors.term-neon');
+            padding: 2rem; background: rgba(255, 51, 0, 0.05); box-shadow: 0 0 40px rgba(255,51,0,0.2);
+            position: relative; overflow: hidden;
+        }
+        .gauge-bar-bg { width: 100%; height: 25px; background: #000; border: 1px solid theme('colors.term-cyan'); margin: 20px 0; position: relative; }
+        .gauge-bar-fill { height: 100%; width: 0%; background: theme('colors.term-cyan'); transition: width 0.05s linear; }
+        .gauge-target { position: absolute; left: 100%; top: -5px; height: 35px; width: 3px; background: #fff; box-shadow: 0 0 15px #fff; }
+        
+        #btn-pressurize {
+            background: transparent; color: theme('colors.term-neon'); border: 2px dashed theme('colors.term-neon');
+            padding: 15px 30px; font-family: 'Syncopate'; font-weight: 900; width: 100%; cursor: pointer;
+            transition: all 0.2s; text-transform: uppercase; user-select: none;
+        }
+        #btn-pressurize:active { background: theme('colors.term-neon'); color: black; border-style: solid; transform: scale(0.98); }
+        #btn-pressurize.locked { background: theme('colors.term-cyan'); color: black; border-color: theme('colors.term-cyan'); pointer-events: none; animation: pulse-lock 1s infinite; }
+        @keyframes pulse-lock { 0%, 100% { box-shadow: 0 0 10px theme('colors.term-cyan'); } 50% { box-shadow: 0 0 30px theme('colors.term-cyan'); } }
+
+        /* Fake Console Boot */
+        #console-boot {
+            position: fixed; inset: 0; background: black; z-index: 99998; color: #0f0; font-family: monospace;
+            padding: 40px; display: none; flex-direction: column; justify-content: flex-end; font-size: 14px;
+            text-shadow: 0 0 5px #0f0;
+        }
+        .log-line { margin: 2px 0; opacity: 0; animation: type-line 0.1s forwards; }
+        @keyframes type-line { to { opacity: 1; } }
+
+        /* --- EXTREME GLITCH EFFECTS --- */
+        .glitch-text { position: relative; display: inline-block; font-weight: 900; }
+        .glitch-text::before, .glitch-text::after {
+            content: attr(data-text); position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: theme('colors.term-bg');
+        }
+        .glitch-text::before { left: 4px; text-shadow: -2px 0 theme('colors.term-alert'); clip: rect(24px, 550px, 90px, 0); animation: glitch-anim-2 2s infinite linear alternate-reverse; }
+        .glitch-text::after { left: -4px; text-shadow: -2px 0 theme('colors.term-cyan'); clip: rect(85px, 550px, 140px, 0); animation: glitch-anim 1.5s infinite linear alternate-reverse; }
+        @keyframes glitch-anim {
+            0% { clip: rect(15px, 9999px, 83px, 0); } 20% { clip: rect(51px, 9999px, 13px, 0); } 40% { clip: rect(100px, 9999px, 59px, 0); } 60% { clip: rect(22px, 9999px, 91px, 0); } 80% { clip: rect(74px, 9999px, 44px, 0); } 100% { clip: rect(18px, 9999px, 66px, 0); }
+        }
+
+        /* --- 3D THERMAL PRODUCT CARDS --- */
+        .thermal-card {
+            border: 1px solid theme('colors.term-grid'); background: rgba(5,5,5,0.9);
+            position: relative; transition: border-color 0.3s;
+            transform-style: preserve-3d; /* Abilita 3D child elements */
+        }
+        .thermal-card::before {
+            content: ''; position: absolute; inset: -2px; background: linear-gradient(45deg, transparent, theme('colors.term-neon'), transparent);
+            z-index: -1; opacity: 0; transition: opacity 0.3s;
+        }
+        .thermal-card:hover { border-color: transparent; z-index: 10; }
+        .thermal-card:hover::before { opacity: 1; }
+
+        .thermal-img-wrap {
+            aspect-ratio: 1/1; background: #000; position: relative; overflow: hidden;
+            display: flex; align-items: center; justify-content: center;
+            transform: translateZ(30px); /* 3D Pop out effect */
+            box-shadow: inset 0 0 50px rgba(255,51,0,0.1);
+        }
+        
+        .thermal-scan {
+            position: absolute; inset: 0; background: linear-gradient(to bottom, rgba(255,51,0,0) 0%, rgba(255,51,0,0.3) 50%, rgba(255,51,0,0) 100%);
+            animation: scanline 3s linear infinite; pointer-events: none; z-index: 5; mix-blend-mode: screen;
+        }
+        @keyframes scanline { 0% { transform: translateY(-100%); } 100% { transform: translateY(100%); } }
+        
+        .mock-icon {
+            font-size: 110px; color: transparent; -webkit-text-stroke: 2px theme('colors.term-cyan');
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); filter: drop-shadow(0 0 10px theme('colors.term-cyan'));
+            transform: translateZ(50px);
+        }
+        .thermal-card:hover .mock-icon {
+            color: theme('colors.term-neon'); -webkit-text-stroke: 0px; filter: drop-shadow(0 0 30px theme('colors.term-neon'));
+            transform: translateZ(80px) scale(1.15); /* Extreme 3D Pop */
+        }
+
+        .data-overlay { position: absolute; padding: 12px; font-size: 10px; pointer-events: none; z-index: 10; font-weight: bold; }
+        .data-tl { top: 0; left: 0; color: theme('colors.term-cyan'); }
+        .data-tr { top: 0; right: 0; color: theme('colors.term-neon'); text-align: right; }
+        .data-bl { bottom: 0; left: 0; color: #fff; }
+
+        .btn-terminal {
+            width: 100%; padding: 15px; background: transparent; border: 1px solid theme('colors.term-cyan');
+            color: theme('colors.term-cyan'); text-transform: uppercase; font-weight: 900; font-family: 'Syncopate'; cursor: pointer;
+            position: relative; overflow: hidden; transition: all 0.3s;
+            transform: translateZ(40px);
+        }
+        .btn-terminal:hover { background: theme('colors.term-cyan'); color: black; box-shadow: 0 0 30px theme('colors.term-cyan'); }
+
+        /* --- DRAWER (PAYLOAD) --- */
+        #payload-drawer {
+            position: fixed; top: 0; right: -100%; width: 100%; max-width: 500px; height: 100vh;
+            background: rgba(2, 2, 2, 0.98); backdrop-filter: blur(20px); border-left: 2px solid theme('colors.term-neon');
+            z-index: 10000; transition: right 0.4s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column;
+            box-shadow: -30px 0 80px rgba(255, 51, 0, 0.15);
+        }
+        #payload-drawer.open { right: 0; }
+        .payload-item { border-left: 4px solid theme('colors.term-cyan'); margin-bottom: 20px; background: rgba(0,255,204,0.05); padding: 15px; position: relative; overflow: hidden; }
+        .payload-item::before { content: ''; position: absolute; top: 0; left: -100%; width: 100%; height: 1px; background: theme('colors.term-cyan'); animation: scan-right 2s linear infinite; }
+        @keyframes scan-right { to { left: 100%; } }
+
+        /* --- MARQUEE AGGRESSIVO --- */
+        .warning-tape {
+            background: theme('colors.term-neon'); color: black; font-weight: 900; font-family: 'Syncopate';
+            white-space: nowrap; overflow: hidden; padding: 6px 0; border-y: 2px solid black; box-shadow: 0 0 20px theme('colors.term-neon');
+        }
+        .warning-tape span { display: inline-block; animation: marquee-fast 5s linear infinite; }
+        @keyframes marquee-fast { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+
+    </style>
+</head>
+<body class="antialiased selection:bg-term-cyan selection:text-black relative">
+
+    <canvas id="matrix-canvas"></canvas>
+    <div class="radar-bg"></div>
+    <div class="crt-overlay"></div>
+
+    <!-- TERMINAL BOOT SEQUENCE (1.5 BAR INTERATTIVO) -->
+    <div id="terminal-boot">
+        <div class="text-center mb-8 relative z-10">
+            <svg viewBox="0 0 24 24" class="w-32 h-32 mx-auto mb-6 stroke-term-neon fill-none stroke-2 animate-pulse" style="filter: drop-shadow(0 0 20px red);">
+                <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                <circle cx="12" cy="12" r="3" class="fill-term-cyan stroke-none" />
+            </svg>
+            <h1 class="font-display text-4xl font-black text-white mb-2 tracking-widest">TRADATE MAINFRAME</h1>
+            <p class="text-term-cyan font-bold tracking-widest bg-term-cyan/10 inline-block px-4 py-1 border border-term-cyan/30">RESTRICTED ACCESS PROTOCOL</p>
+        </div>
+
+        <div class="valve-container z-10 bg-black/80 backdrop-blur-md">
+            <div class="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0IiBoZWlnaHQ9IjQiPgo8cmVjdCB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjMDAwIj48L3JlY3Q+CjxyZWN0IHdpZHRoPSIxIiBoZWlnaHQ9IjEiIGZpbGw9IiMzMzMiPjwvcmVjdD4KPC9zdmc+')] opacity-50 z-[-1]"></div>
+            
+            <div class="text-xs text-left text-term-alert font-bold mb-3 uppercase animate-pulse">> CALIBRATION REQUIRED</div>
+            <div class="flex justify-between items-end font-bold border-b border-gray-800 pb-2">
+                <span class="text-gray-400">SYS_PRESSURE:</span>
+                <span id="pressure-readout" class="text-3xl text-white font-display">0.00 <span class="text-sm">BAR</span></span>
+            </div>
+            
+            <div class="gauge-bar-bg">
+                <div class="gauge-bar-fill" id="pressure-bar"></div>
+                <div class="gauge-target"></div>
+            </div>
+
+            <button id="btn-pressurize" class="mt-4 select-none hover:shadow-[0_0_20px_#ff3300]">
+                HOLD TO PRESSURIZE
+            </button>
+            <p class="text-[11px] text-term-cyan font-bold mt-4 h-4" id="boot-msg"></p>
+        </div>
+    </div>
+
+    <!-- HACKING CONSOLE ANIMATION -->
+    <div id="console-boot">
+        <div id="console-logs"></div>
+    </div>
+
+    <!-- MAIN INTERFACE -->
+    <div id="main-interface" class="opacity-0 pointer-events-none transition-opacity duration-1000 hidden relative z-10">
+        
+        <!-- HEADER / TAPE -->
+        <div class="fixed top-0 w-full z-50">
+            <div class="warning-tape">
+                <span>
+                    // DANGER // THERMAL ZONE // DANGER // 1.5 BAR DETECTED // A ISCHIA SPLENDE IL SOLE // A TRADATE SPLENDO IO // DANGER // THERMAL ZONE // DANGER // 1.5 BAR DETECTED // A ISCHIA SPLENDE IL SOLE // A TRADATE SPLENDO IO //
+                </span>
+            </div>
+            <nav class="flex justify-between items-center p-4 bg-black/90 backdrop-blur-lg border-b border-term-neon">
+                <div class="font-display font-black tracking-[0.3em] text-white flex items-center gap-3">
+                    <div class="w-3 h-3 bg-term-neon rounded-full animate-ping"></div> PANICO®
+                </div>
+                <div class="flex items-center gap-8">
+                    <span class="text-xs text-term-cyan font-bold hidden md:block border border-term-cyan px-2 py-1">COORD: 45.70°N / 8.90°E</span>
+                    <button id="cart-toggle" class="font-display text-sm font-bold border-2 border-term-neon px-6 py-2 bg-term-neon/10 hover:bg-term-neon hover:text-black transition-all text-white">
+                        PAYLOAD [ <span id="cart-count">0</span> ]
+                    </button>
+                </div>
+            </nav>
+        </div>
+
+        <!-- HERO RADAR SECTION -->
+        <header class="min-h-screen flex flex-col justify-center px-6 md:px-12 relative pt-24 pb-12 border-b border-term-grid">
+            <div class="absolute inset-0 flex items-center justify-center opacity-5 pointer-events-none z-0">
+                <i class="fa-solid fa-fire text-[80vw]"></i>
+            </div>
+            
+            <div class="relative z-10 max-w-7xl mx-auto w-full">
+                <div class="border-l-8 border-term-neon pl-8 mb-12 bg-gradient-to-r from-term-neon/10 to-transparent py-4">
+                    <h2 class="text-term-cyan font-bold tracking-[0.5em] text-sm mb-4">> PROTOCOL: OMEGA-SFIATO</h2>
+                    <h1 class="text-6xl md:text-8xl lg:text-[9rem] font-display font-black leading-[0.8] text-white glitch-text mb-4" data-text="THERMAL">THERMAL</h1>
+                    <h1 class="text-6xl md:text-8xl lg:text-[9rem] font-display font-black leading-[0.8] text-transparent" style="-webkit-text-stroke: 3px #ff3300; filter: drop-shadow(0 0 20px rgba(255,51,0,0.5));">DOMINANCE</h1>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-8 mt-20 border-t border-dashed border-term-grid pt-10">
+                    <div class="col-span-2">
+                        <p class="text-gray-300 text-xl leading-relaxed font-mono bg-black/50 p-6 border border-gray-800">
+                            <span class="text-term-neon font-bold">> WARNING: UNAUTHORIZED ACCESS TO CLASSIFIED ARTIFACTS.</span><br><br>
+                            L'abbigliamento convenzionale brucia. I prototipi qui archiviati sono forgiati per resistere alla pressione di 1.5 BAR e dominare il flusso termico globale. Prepararsi all'estrazione.
+                        </p>
+                    </div>
+                    <div class="flex flex-col items-start md:items-end justify-center">
+                        <div class="text-sm text-term-cyan font-bold mb-4 px-4 py-1 border border-term-cyan animate-pulse text-right">SYSTEM STATUS: OPTIMAL</div>
+                        <a href="#database" class="bg-white text-black font-display font-black px-10 py-5 uppercase hover:bg-term-neon hover:text-white transition-all text-lg tracking-widest w-full text-center md:w-auto shadow-[0_0_30px_rgba(255,255,255,0.2)]">
+                            ACCESS VAULT
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- DATABASE GRID (Le card ora sono in 3D) -->
+        <main id="database" class="px-6 md:px-12 py-32 max-w-[1600px] mx-auto perspective-1000">
+            <div class="flex justify-between items-end mb-16 border-b border-term-grid pb-6">
+                <h3 class="text-4xl font-display font-black text-white uppercase tracking-widest">ARTIFACTS_DB.EXE</h3>
+                <div class="text-sm text-term-neon font-bold bg-term-neon/20 px-4 py-2 border border-term-neon">/// 12 ITEMS LOADED</div>
+            </div>
+
+            <!-- La griglia ospita le thermal-card che reagiscono al mouse in 3D -->
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-10">
+                
+                <!-- PRODOTTO 1: RADIANT TEE -->
+                <article class="thermal-card group" data-id="X01" data-price="45000" data-name="LIV.1 SHIELD [RADIANT]">
+                    <div class="thermal-img-wrap">
+                        <div class="thermal-scan"></div>
+                        <div class="data-overlay data-tl">CLASS: APPAREL<br>M-ID: 884-A</div>
+                        <div class="data-overlay data-tr">TEMP: 180°C<br>STAT: ACTIVE</div>
+                        <div class="data-overlay data-bl font-display text-[8px] opacity-70 text-term-neon font-bold tracking-widest">"A ISCHIA SPLENDE IL SOLE"</div>
+                        
+                        <i class="fa-solid fa-shirt mock-icon"></i>
+                        <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/90 z-20 backdrop-blur-sm">
+                            <div class="w-full px-6" style="transform: translateZ(60px);">
+                                <select class="w-full bg-term-dark text-term-cyan border-2 border-term-cyan p-3 text-sm mb-4 font-mono font-bold focus:outline-none size-select">
+                                    <option value="">SELECT ARMOR SIZE</option>
+                                    <option value="S">SMALL (CIVILIAN)</option>
+                                    <option value="M">MEDIUM (TECH)</option>
+                                    <option value="L">LARGE (COMMANDER)</option>
+                                </select>
+                                <button class="btn-terminal js-add-to-cart">EXTRACT // €45.00</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="p-6 bg-black">
+                        <div class="flex justify-between items-start mb-3">
+                            <h4 class="font-bold text-white text-base font-display leading-tight uppercase">LIV.1 SHIELD [RADIANT]</h4>
+                            <span class="text-term-neon font-black text-lg">€45</span>
+                        </div>
+                        <p class="text-xs text-gray-400 font-mono leading-relaxed">Armatura termica di base. Progettata per eclissare irreversibilmente la radiazione solare campana.</p>
+                    </div>
+                </article>
+
+                <!-- PRODOTTO 2: LION HOODIE -->
+                <article class="thermal-card group" data-id="X02" data-price="85000" data-name="COMBAT EXOSKELETON [LION]">
+                    <div class="absolute -top-3 -right-3 bg-term-neon text-black font-black px-4 py-2 text-[10px] z-30 font-display shadow-[0_0_20px_#ff3300]">RESTRICTED</div>
+                    <div class="thermal-img-wrap" style="background: radial-gradient(circle, #2a0a00 0%, #000 100%);">
+                        <div class="thermal-scan"></div>
+                        <div class="data-overlay data-tl">CLASS: HEAVY<br>M-ID: 991-B</div>
+                        <div class="data-overlay data-bl font-display text-[8px] opacity-70 text-term-cyan font-bold tracking-widest">"CALDAISTI SI NASCE"</div>
+                        
+                        <i class="fa-solid fa-user-astronaut mock-icon text-term-neon" style="-webkit-text-stroke: 0;"></i>
+                        <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/90 z-20 backdrop-blur-sm">
+                            <div class="w-full px-6" style="transform: translateZ(60px);">
+                                <select class="w-full bg-term-dark text-term-cyan border-2 border-term-cyan p-3 text-sm mb-4 font-mono font-bold focus:outline-none size-select">
+                                    <option value="">SELECT ARMOR SIZE</option>
+                                    <option value="L">LARGE</option>
+                                    <option value="XL">TITAN</option>
+                                </select>
+                                <button class="btn-terminal js-add-to-cart">EXTRACT // €85.00</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="p-6 bg-black">
+                        <div class="flex justify-between items-start mb-3">
+                            <h4 class="font-bold text-white text-base font-display leading-tight uppercase text-term-neon">COMBAT EXOSKELETON</h4>
+                            <span class="text-white font-black text-lg">€85</span>
+                        </div>
+                        <p class="text-xs text-gray-400 font-mono leading-relaxed">Modulo felpa aggressivo. Il pattern leonino destabilizza i circuiti delle caldaie ostili inducendo il blocco termico.</p>
+                    </div>
+                </article>
+
+                <!-- PRODOTTO 3: TACTICAL VEST -->
+                <article class="thermal-card group" data-id="X03" data-price="120000" data-name="1.5 BAR CHEST RIG">
+                    <div class="thermal-img-wrap">
+                        <div class="thermal-scan"></div>
+                        <div class="data-overlay data-tl">CLASS: GEAR<br>M-ID: 004-V</div>
+                        
+                        <i class="fa-solid fa-vest-patches mock-icon"></i>
+                        <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/90 z-20 backdrop-blur-sm">
+                            <div class="w-full px-6" style="transform: translateZ(60px);">
+                                <input type="hidden" class="size-select" value="ADJUSTABLE">
+                                <div class="text-sm font-bold text-term-cyan mb-4 text-center border-2 border-dashed border-term-cyan/30 py-3 bg-term-cyan/5 tracking-widest">AUTO-FIT ENABLED</div>
+                                <button class="btn-terminal js-add-to-cart">EXTRACT // €120.00</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="p-6 bg-black">
+                        <div class="flex justify-between items-start mb-3">
+                            <h4 class="font-bold text-white text-base font-display leading-tight uppercase">1.5 BAR CHEST RIG</h4>
+                            <span class="text-term-neon font-black text-lg">€120</span>
+                        </div>
+                        <p class="text-xs text-gray-400 font-mono leading-relaxed">Supporto tattico per manometri multipli. Tasche foderate in piombo radiante.</p>
+                    </div>
+                </article>
+
+                <!-- PRODOTTO 4: BLUEPRINT POSTER -->
+                <article class="thermal-card group" data-id="X04" data-price="25000" data-name="DOGMA SCHEMATICS">
+                    <div class="thermal-img-wrap" style="background: repeating-linear-gradient(45deg, #050505, #050505 10px, #0a0a0a 10px, #0a0a0a 20px);">
+                        <div class="thermal-scan"></div>
+                        <i class="fa-solid fa-map mock-icon text-[90px]"></i>
+                        <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/90 z-20 backdrop-blur-sm">
+                            <div class="w-full px-6" style="transform: translateZ(60px);">
+                                <input type="hidden" class="size-select" value="A1 POSTER">
+                                <button class="btn-terminal js-add-to-cart">DECRYPT FILE // €25.00</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="p-6 bg-black">
+                        <div class="flex justify-between items-start mb-3">
+                            <h4 class="font-bold text-white text-base font-display leading-tight uppercase">DOGMA SCHEMATICS A1</h4>
+                            <span class="text-term-neon font-black text-lg">€25</span>
+                        </div>
+                        <p class="text-xs text-gray-400 font-mono leading-relaxed">Schema di flusso secretato. Rivela la formula per il mantenimento della pressione spirituale a 1.5 fissi.</p>
+                    </div>
+                </article>
+                
+                <!-- PRODOTTO 5: NALGENE -->
+                <article class="thermal-card group" data-id="X05" data-price="35000" data-name="COOLANT CELL 1L">
+                    <div class="thermal-img-wrap">
+                        <div class="thermal-scan"></div>
+                        <div class="data-overlay data-tr text-blue-400">FLUID: H2O+<br>VOL: 1000ML</div>
+                        <i class="fa-solid fa-flask mock-icon"></i>
+                        <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/90 z-20 backdrop-blur-sm">
+                            <div class="w-full px-6" style="transform: translateZ(60px);">
+                                <input type="hidden" class="size-select" value="1 LITER">
+                                <button class="btn-terminal js-add-to-cart">EXTRACT // €35.00</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="p-6 bg-black">
+                        <div class="flex justify-between items-start mb-3">
+                            <h4 class="font-bold text-white text-base font-display leading-tight uppercase">COOLANT CELL 1L</h4>
+                            <span class="text-term-neon font-black text-lg">€35</span>
+                        </div>
+                        <p class="text-xs text-gray-400 font-mono leading-relaxed">Cilindro di contenimento per liquidi di raffreddamento pre-spurgo. Uso orale consentito.</p>
+                    </div>
+                </article>
+
+                <!-- PRODOTTO 6: CAUTION TAPE -->
+                <article class="thermal-card group" data-id="X06" data-price="18000" data-name="HAZARD TAPE [50M]">
+                    <div class="thermal-img-wrap border border-yellow-500/30">
+                        <div class="thermal-scan"></div>
+                        <i class="fa-solid fa-triangle-exclamation mock-icon" style="-webkit-text-stroke-color: yellow;"></i>
+                        <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/90 z-20 backdrop-blur-sm">
+                            <div class="w-full px-6" style="transform: translateZ(60px);">
+                                <input type="hidden" class="size-select" value="50 METERS">
+                                <button class="btn-terminal js-add-to-cart">EXTRACT // €18.00</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="p-6 bg-black">
+                        <div class="flex justify-between items-start mb-3">
+                            <h4 class="font-bold text-white text-base font-display leading-tight uppercase text-yellow-500">HAZARD TAPE [50M]</h4>
+                            <span class="text-white font-black text-lg">€18</span>
+                        </div>
+                        <p class="text-xs text-gray-400 font-mono leading-relaxed">Nastro di isolamento tattico per delimitare zone ad altissima concentrazione di radiosità pannichiana.</p>
+                    </div>
+                </article>
+
+                <!-- PRODOTTO 7: GOGGLES -->
+                <article class="thermal-card group" data-id="X07" data-price="55000" data-name="OPTICAL SHIELD">
+                    <div class="thermal-img-wrap">
+                        <div class="thermal-scan"></div>
+                        <i class="fa-solid fa-glasses mock-icon text-[120px]"></i>
+                        <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/90 z-20 backdrop-blur-sm">
+                            <div class="w-full px-6" style="transform: translateZ(60px);">
+                                <input type="hidden" class="size-select" value="AUTO-FIT">
+                                <button class="btn-terminal js-add-to-cart">EXTRACT // €55.00</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="p-6 bg-black">
+                        <div class="flex justify-between items-start mb-3">
+                            <h4 class="font-bold text-white text-base font-display leading-tight uppercase">OPTICAL SHIELD</h4>
+                            <span class="text-term-neon font-black text-lg">€55</span>
+                        </div>
+                        <p class="text-xs text-gray-400 font-mono leading-relaxed">Lenti al grafene per filtrare il vapore corrosivo e individuare micro-perdite a occhio nudo.</p>
+                    </div>
+                </article>
+
+                <!-- PRODOTTO 8: GLOVES -->
+                <article class="thermal-card group" data-id="X08" data-price="42000" data-name="KEVLAR APPENDAGES">
+                    <div class="thermal-img-wrap" style="background: radial-gradient(circle, #300 0%, #000 100%);">
+                        <div class="thermal-scan"></div>
+                        <div class="data-overlay data-tr text-term-neon text-xs">MAX: 1000°C</div>
+                        <i class="fa-solid fa-hand-fist mock-icon"></i>
+                        <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/90 z-20 backdrop-blur-sm">
+                            <div class="w-full px-6" style="transform: translateZ(60px);">
+                                <select class="w-full bg-term-dark text-term-cyan border-2 border-term-cyan p-3 text-sm mb-4 font-mono font-bold focus:outline-none size-select">
+                                    <option value="">SELECT SIZE</option>
+                                    <option value="M">STANDARD</option>
+                                    <option value="L">OVERSIZED</option>
+                                </select>
+                                <button class="btn-terminal js-add-to-cart">EXTRACT // €42.00</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="p-6 bg-black">
+                        <div class="flex justify-between items-start mb-3">
+                            <h4 class="font-bold text-white text-base font-display leading-tight uppercase">KEVLAR APPENDAGES</h4>
+                            <span class="text-term-neon font-black text-lg">€42</span>
+                        </div>
+                        <p class="text-xs text-gray-400 font-mono leading-relaxed">Guanti forgiati direttamente nel fuoco dello scambiatore primario. Indistruttibili.</p>
+                    </div>
+                </article>
+
+            </div>
+        </main>
+
+        <!-- FOOTER TERMINAL -->
+        <footer class="border-t-4 border-term-neon py-16 px-6 text-center bg-black relative overflow-hidden">
+            <i class="fa-solid fa-radiation absolute -bottom-20 -left-10 text-[300px] text-term-neon opacity-10"></i>
+            <h2 class="font-display font-black text-4xl mb-6 text-white glitch-text z-10 relative" data-text="PANICO MAINFRAME">PANICO MAINFRAME</h2>
+            <p class="text-term-cyan text-sm tracking-[0.5em] font-mono mb-8 font-bold z-10 relative">END OF TRANSMISSION // CONNECTION SECURE // TRADATE PROTOCOL</p>
+            <button onclick="location.reload()" class="relative z-10 font-display text-term-neon font-bold text-sm hover:text-black hover:bg-term-neon border-2 border-term-neon px-8 py-3 transition-all tracking-widest uppercase">> OVERRIDE & DISCONNECT</button>
+        </footer>
+
+    </div>
+
+    <!-- PAYLOAD DRAWER (CART) -->
+    <aside id="payload-drawer">
+        <div class="p-8 border-b-2 border-term-neon bg-black flex justify-between items-center">
+            <h2 class="font-display font-black text-2xl text-white tracking-widest">PAYLOAD <span id="drawer-count" class="text-term-neon">[0]</span></h2>
+            <button id="close-cart" class="text-3xl text-term-cyan hover:text-term-neon transition-colors"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        
+        <div class="flex-grow overflow-y-auto p-8" id="cart-items-container">
+            <div id="empty-cart-msg" class="h-full flex flex-col items-center justify-center text-term-cyan opacity-40 font-display text-sm tracking-[0.3em] text-center">
+                <i class="fa-solid fa-satellite-dish text-6xl mb-6 animate-pulse"></i>
+                NO ARTIFACTS DETECTED<br>AWAITING EXTRACTION COMMAND
+            </div>
+        </div>
+
+        <div class="p-8 border-t-2 border-term-neon bg-black">
+            <div class="flex justify-between items-center mb-8 border-b border-gray-800 pb-4">
+                <span class="text-sm text-gray-400 font-display font-bold tracking-widest">CREDITS REQ:</span>
+                <span class="font-display font-black text-4xl text-term-cyan drop-shadow-[0_0_10px_rgba(0,255,204,0.5)]" id="cart-total">€0.00</span>
+            </div>
+            <button class="w-full bg-term-neon text-black font-display font-black py-5 hover:bg-white hover:shadow-[0_0_30px_#fff] transition-all uppercase tracking-widest text-lg">
+                INITIATE TRANSFER
+            </button>
+        </div>
+    </aside>
+
+    <!-- LOGIC SCRIPT -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            
+            // --- MATRIX RAIN LOGIC ---
+            const canvas = document.getElementById('matrix-canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%^&*'.split('');
+            const fontSize = 16;
+            const columns = canvas.width / fontSize;
+            const drops = [];
+            for(let x = 0; x < columns; x++) drops[x] = 1;
+            
+            function drawMatrix() {
+                ctx.fillStyle = 'rgba(2, 2, 2, 0.05)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#ff3300'; 
+                ctx.font = fontSize + 'px monospace';
+                for(let i = 0; i < drops.length; i++) {
+                    const text = chars[Math.floor(Math.random() * chars.length)];
+                    ctx.fillText(text, i * fontSize, drops[i] * fontSize);
+                    if(drops[i] * fontSize > canvas.height && Math.random() > 0.975) drops[i] = 0;
+                    drops[i]++;
+                }
+            }
+            setInterval(drawMatrix, 40);
+
+            // --- 3D CARD TILT LOGIC ---
+            const cards = document.querySelectorAll('.thermal-card');
+            cards.forEach(card => {
+                card.addEventListener('mousemove', e => {
+                    const rect = card.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    const centerX = rect.width / 2;
+                    const centerY = rect.height / 2;
+                    const rotateX = ((y - centerY) / centerY) * -15; // Invertito e aumentato
+                    const rotateY = ((x - centerX) / centerX) * 15;
+                    card.style.transform = `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.05, 1.05, 1.05)`;
+                });
+                card.addEventListener('mouseleave', () => {
+                    card.style.transform = `perspective(1000px) rotateX(0deg) rotateY(0deg) scale3d(1, 1, 1)`;
+                });
+            });
+
+            // --- BOOT SEQUENCE LOGIC (1.5 BAR AUTO-UNLOCK) ---
+            const bootScreen = document.getElementById('terminal-boot');
+            const mainInterface = document.getElementById('main-interface');
+            const consoleBoot = document.getElementById('console-boot');
+            const consoleLogs = document.getElementById('console-logs');
+            const btnPressurize = document.getElementById('btn-pressurize');
+            const pressureBar = document.getElementById('pressure-bar');
+            const pressureReadout = document.getElementById('pressure-readout');
+            const bootMsg = document.getElementById('boot-msg');
+            
+            let pressure = 0.00;
+            let pressInterval;
+            let isHolding = false;
+            let unlocked = false;
+
+            const handlePressStart = (e) => {
+                // Gestione eventi multi-device per evitare doppi trigger
+                if(e.type !== 'mousedown' && e.type !== 'touchstart') return;
+                if(unlocked || isHolding) return;
+                isHolding = true;
+                btnPressurize.innerText = "PRESSURIZING SYSTEM...";
+                bootMsg.innerText = "> WARNING: APPROACHING 1.5 BAR";
+                
+                pressInterval = setInterval(() => {
+                    pressure += 0.015; // Velocità calibrata
+                    updateGauge();
+
+                    // AUTO UNLOCK APPENA TOCCA 1.50
+                    if(pressure >= 1.50) {
+                        pressure = 1.50;
+                        updateGauge();
+                        clearInterval(pressInterval);
+                        if (!unlocked) {
+                            triggerUnlock();
+                        }
+                    }
+                }, 30);
+            };
+
+            const handlePressEnd = (e) => {
+                if(unlocked || !isHolding) return;
+                isHolding = false;
+                clearInterval(pressInterval);
+                
+                if(pressure < 1.50) {
+                    btnPressurize.innerText = "HOLD TO PRESSURIZE";
+                    btnPressurize.style.borderColor = "";
+                    btnPressurize.style.color = "";
+                    bootMsg.innerText = "> PRESSURE LOST. RESTART SEQUENCE.";
+                    
+                    // Svuota gradualmente
+                    let drain = setInterval(() => {
+                        pressure -= 0.05;
+                        if(pressure <= 0) {
+                            pressure = 0;
+                            clearInterval(drain);
+                            bootMsg.innerText = "";
+                        }
+                        updateGauge();
+                    }, 20);
+                }
+            };
+
+            const updateGauge = () => {
+                let displayPres = pressure < 0 ? 0 : pressure;
+                pressureReadout.innerText = displayPres.toFixed(2) + " BAR";
+                let pct = (displayPres / 1.5) * 100;
+                pressureBar.style.width = pct + '%';
+                
+                // Cambio colore in prossimità del limite
+                if(pressure >= 1.40) {
+                    pressureBar.style.background = '#00ffcc';
+                    btnPressurize.style.borderColor = "#00ffcc";
+                    btnPressurize.style.color = "#00ffcc";
+                } else {
+                    pressureBar.style.background = '#ff3300';
+                    btnPressurize.style.borderColor = "#ff3300";
+                    btnPressurize.style.color = "#ff3300";
+                }
+            };
+
+            function triggerUnlock() {
+                unlocked = true;
+                btnPressurize.innerText = "PRESSURE LOCKED";
+                btnPressurize.classList.add('locked');
+                bootMsg.innerText = "> 1.5 BAR ACHIEVED. COMPILING PROTOCOL...";
+                
+                // Avvia la finta console terminale
+                setTimeout(() => {
+                    bootScreen.style.opacity = '0';
+                    setTimeout(() => {
+                        bootScreen.style.display = 'none';
+                        runConsoleBootSequence();
+                    }, 500);
+                }, 1000);
+            }
+
+            // Hacking Text Sequence
+            function runConsoleBootSequence() {
+                consoleBoot.style.display = 'flex';
+                const logs = [
+                    "INIT TRADATE_KERNEL.SYS...",
+                    "BYPASSING ISCHIA SOLAR_RAD_DEFENSE [OK]",
+                    "CALIBRATING BOILER_VALVES_V2 [OK]",
+                    "LOADING LION_EXOSKELETON_DRIVERS [OK]",
+                    "ESTABLISHING SECURE THERMAL LINK...",
+                    "WARNING: PANICO RADIANCE EXCEEDS KNOWN LIMITS",
+                    "OVERRIDING SAFETIES...",
+                    "ACCESS GRANTED."
+                ];
+                
+                let i = 0;
+                function printLog() {
+                    if (i < logs.length) {
+                        const line = document.createElement('div');
+                        line.className = 'log-line';
+                        line.innerText = `> ${logs[i]}`;
+                        if(logs[i].includes("WARNING")) line.style.color = "red";
+                        if(logs[i].includes("ACCESS GRANTED")) {
+                            line.style.fontSize = "20px";
+                            line.style.fontWeight = "bold";
+                        }
+                        consoleLogs.appendChild(line);
+                        i++;
+                        setTimeout(printLog, 150 + Math.random() * 200); // Ritardo random typing
+                    } else {
+                        // Fine sequence, mostra main interface
+                        setTimeout(() => {
+                            consoleBoot.style.display = 'none';
+                            mainInterface.classList.remove('hidden');
+                            setTimeout(() => {
+                                mainInterface.classList.remove('opacity-0');
+                            }, 50);
+                        }, 800);
+                    }
+                }
+                printLog();
+            }
+
+            // Event Listeners Mouse/Touch
+            btnPressurize.addEventListener('mousedown', handlePressStart);
+            window.addEventListener('mouseup', handlePressEnd);
+            btnPressurize.addEventListener('touchstart', handlePressStart);
+            window.addEventListener('touchend', handlePressEnd);
+
+            // --- PAYLOAD (CART) LOGIC ---
+            let cart = [];
+            const cartToggle = document.getElementById('cart-toggle');
+            const cartDrawer = document.getElementById('payload-drawer');
+            const closeCartBtn = document.getElementById('close-cart');
+            const cartItemsContainer = document.getElementById('cart-items-container');
+            const emptyCartMsg = document.getElementById('empty-cart-msg');
+            const cartTotalEl = document.getElementById('cart-total');
+            const cartCountEls = [document.getElementById('cart-count'), document.getElementById('drawer-count')];
+
+            function toggleCart() { cartDrawer.classList.toggle('open'); }
+            cartToggle.addEventListener('click', toggleCart);
+            closeCartBtn.addEventListener('click', toggleCart);
+
+            const addBtns = document.querySelectorAll('.js-add-to-cart');
+            addBtns.forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const card = e.target.closest('.thermal-card');
+                    const id = card.dataset.id;
+                    const name = card.dataset.name;
+                    const priceStr = card.dataset.price;
+                    const price = parseFloat(priceStr) / 1000; 
+                    
+                    const sizeInput = card.querySelector('.size-select');
+                    let size = "";
+                    if(sizeInput) {
+                        size = sizeInput.value;
+                        if(size === "") {
+                            alert("!! ERRORE_SYS: PARAMETRO (TAGLIA) NON DEFINITO !!");
+                            return;
+                        }
+                    }
+
+                    addToCart(id, name, price, size);
+                    
+                    const originalText = btn.innerText;
+                    btn.innerText = "DATA EXTRACTED";
+                    btn.style.background = "#00ffcc";
+                    btn.style.color = "black";
+                    setTimeout(() => {
+                        btn.innerText = originalText;
+                        btn.style.background = "";
+                        btn.style.color = "";
+                    }, 1000);
+
+                    if(!cartDrawer.classList.contains('open')) toggleCart();
+                });
+            });
+
+            function addToCart(id, name, price, size) {
+                const uniqueId = id + "-" + size;
+                const existingItem = cart.find(item => item.uniqueId === uniqueId);
+                if (existingItem) existingItem.qty += 1;
+                else cart.push({ id, uniqueId, name, price, size, qty: 1 });
+                updateCartUI();
+            }
+
+            window.removeFromCart = function(uniqueId) {
+                cart = cart.filter(item => item.uniqueId !== uniqueId);
+                updateCartUI();
+            }
+
+            function updateCartUI() {
+                if (cart.length === 0) {
+                    cartItemsContainer.innerHTML = '';
+                    cartItemsContainer.appendChild(emptyCartMsg);
+                    emptyCartMsg.style.display = 'flex';
+                } else {
+                    emptyCartMsg.style.display = 'none';
+                    let html = '';
+                    let total = 0;
+                    let count = 0;
+
+                    cart.forEach(item => {
+                        total += item.price * item.qty;
+                        count += item.qty;
+                        html += `
+                            <div class="payload-item bg-gray-900/50 border border-gray-800">
+                                <div class="flex justify-between items-start">
+                                    <div>
+                                        <h5 class="font-bold text-sm text-term-neon font-display">${item.name}</h5>
+                                        <div class="text-xs text-term-cyan mt-1 font-mono font-bold">ID: ${item.id} // PAR: ${item.size}</div>
+                                    </div>
+                                    <button onclick="removeFromCart('${item.uniqueId}')" class="text-gray-500 hover:text-term-alert text-lg transition-colors"><i class="fa-solid fa-trash-can"></i></button>
+                                </div>
+                                <div class="flex justify-between items-end mt-4 border-t border-dashed border-gray-700 pt-3">
+                                    <span class="text-xs text-white font-mono">> QTY: ${item.qty}</span>
+                                    <span class="font-black text-xl text-white font-display shadow-black drop-shadow-md">€${(item.price * item.qty).toFixed(2)}</span>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    cartItemsContainer.innerHTML = html;
+                    cartTotalEl.innerText = `€${total.toFixed(2)}`;
+                    cartCountEls[0].innerText = count;
+                    cartCountEls[1].innerText = count;
+                }
+            }
+        });
+    </script>
+</body>
+</html>
